@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 
+import aiofiles
 from loguru import logger
 from watchdog.events import FileSystemEventHandler, DirModifiedEvent, FileModifiedEvent
 from watchdog.observers import Observer
@@ -12,7 +13,7 @@ import configuration
 
 class FileProcessor:
     # 采用 Map 来保存重试次数，键值对为文件路径和重试次数
-    retries:dict[str, int] = {}
+    retries: dict[str, int] = {}
 
     @staticmethod
     async def move_changed_file(file_path: str) -> None:
@@ -23,7 +24,7 @@ class FileProcessor:
 
             match configuration.PROCESS_METHOD:
                 case configuration.ProcessMethod.MOVE:
-                    await asyncio.to_thread(shutil.move, file_path, configuration.MOVE_TO)
+                    await asyncio.to_thread(shutil.move, file_path, configuration.MOVE_TO, copy_function=shutil.copy2)
                 case configuration.ProcessMethod.COPY:
                     await asyncio.to_thread(shutil.copy, file_path, configuration.MOVE_TO)
 
@@ -35,7 +36,9 @@ class FileProcessor:
                 FileProcessor.retries[file_path] = FileProcessor.retries.get(file_path, 0) + 1
                 logger.warning(
                     f"Failed to move file {file_path}.\
-                    Because of {file_error}, retrying {FileProcessor.retries[file_path]}/{configuration.MAX_RETRY}")
+                    Because of {file_error}, We will retry in {configuration.WAIT_TIME} seconds.\
+                    Now retrying {FileProcessor.retries[file_path]}/{configuration.MAX_RETRY}")
+                await asyncio.sleep(configuration.WAIT_TIME)
                 await FileProcessor.move_changed_file(file_path)
             else:
                 logger.error(
@@ -52,6 +55,12 @@ class FileProcessor:
                 os.makedirs(file_path)
         except Exception as e:
             logger.error(f"Failed to create directory {file_path}. Error: {e}")
+
+    @staticmethod
+    async def save_failed_file(file_path: str, e: Exception) -> None:
+        async with aiofiles.open('failed_files.txt', 'a') as f:
+            await f.write(f"{file_path} failed to move at {time.strftime('%Y-%m-%d %H:%M:%S')} \n \
+                            Error: {e}\n")
 
 
 class DirectoryEventHandler(FileSystemEventHandler):
@@ -76,7 +85,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
 
 async def monitor_directory():
     event_loop = asyncio.get_running_loop()  # 获取当前事件循环
-    observer = Observer()                    # 创建观察者对象, 用于监视文件系统变化
+    observer = Observer()  # 创建观察者对象, 用于监视文件系统变化
 
     for directory in configuration.WATCH_PATH:
         # 创建目录，为了避免在移动文件时出现目录不存在的错误
