@@ -63,8 +63,14 @@ class FileProcessor:
     @staticmethod
     async def save_failed_file(file_path: str, e: Exception) -> None:
         async with aiofiles.open('failed_files.txt', 'a') as f:
-            await f.write(f"'{file_path}' failed to move at {time.strftime('%Y-%m-%d %H:%M:%S')} \n \
-                            Error: {e}\n")
+            await f.write(f"""
+            [{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}]
+             
+             Failed to move file `{file_path}`
+             Error: {e}
+             
+             
+            """)
 
 
 class DirectoryEventHandler(FileSystemEventHandler):
