@@ -44,6 +44,10 @@ class FileProcessor:
                 logger.error(
                     f"After {configuration.MAX_RETRY} retries, failed to move file {file_path}. Error: {file_error}")
                 FileProcessor.retries.pop(file_path)
+
+                logger.info(f"Saving failed file {file_path} to failed_files.txt")
+                await FileProcessor.save_failed_file(file_path, file_error)
+
         except Exception as e:
             logger.error(f"Failed to move file {file_path}. Error: {e}")
             FileProcessor.retries.pop(file_path)
