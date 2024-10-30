@@ -95,7 +95,8 @@ async def monitor_directory():
     try:
         logger.info(f"Monitoring directory {configuration.WATCH_PATH[0]}")
         while True:
-            await asyncio.sleep(1)  # 保持主线程运行
+            await asyncio.sleep(10)  # 保持主线程运行
+            logger.debug("I am still alive~~~ balabalabala~~~")
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
