@@ -17,6 +17,9 @@ class FileProcessor:
 
     @staticmethod
     async def move_changed_file(file_path: str) -> None:
+        # 等待文件稳定
+        await FileProcessor.wait_for_file_to_stabilize(file_path)
+
         try:
             logger.info(f"Moving file {file_path} to {configuration.MOVE_TO}")
 
@@ -36,9 +39,9 @@ class FileProcessor:
                 FileProcessor.retries[file_path] = FileProcessor.retries.get(file_path, 0) + 1
                 logger.warning(
                     f"Failed to move file {file_path}.\
-                    Because of {file_error}, We will retry in {configuration.WAIT_TIME} seconds.\
+                    Because of {file_error}, We will retry in {configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY} seconds.\
                     Now retrying {FileProcessor.retries[file_path]}/{configuration.MAX_RETRY}")
-                await asyncio.sleep(configuration.WAIT_TIME)
+                await asyncio.sleep(configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY)
                 await FileProcessor.move_changed_file(file_path)
             else:
                 logger.error(
@@ -71,6 +74,26 @@ class FileProcessor:
              
              
             """)
+
+    @staticmethod
+    async def wait_for_file_to_stabilize(file_path: str) -> bool:
+        waiting_count = 0
+
+        while True:
+            # 如果文件大小在等待时间内没有变化，那么认为文件已经稳定
+            current_size = os.path.getsize(file_path)
+
+            await asyncio.sleep(configuration.WAIT_FOR_FILE_TO_STABILIZE)
+            logger.debug(f"Waiting for file {file_path} to stabilize...")
+            logger.debug(f"Current file size: {current_size}, Previous file size: {os.path.getsize(file_path)}")
+
+            if current_size == os.path.getsize(file_path):
+                logger.info(f"I think file `{file_path}` after `{waiting_count}` times `{current_size}` is finally stable :)")
+                return True
+            else:
+                waiting_count += 1
+                logger.debug(f"File {file_path} is still changing... Waiting for {waiting_count} times...")
+
 
 
 class DirectoryEventHandler(FileSystemEventHandler):

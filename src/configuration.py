@@ -11,5 +11,6 @@ IGNORED_DIRECTORIES:[str] = ['__pycache__']                             # 忽略
 
 RECURSIVE:bool = True                                                   # 是否递归监听子目录
 MAX_RETRY:int = 3                                                       # 失败时的重试次数
-WAIT_TIME:float = 1.0                                                   # 重试间隔时间, 单位秒
+WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY:float = 5.0                          # 失败时的重试间隔
+WAIT_FOR_FILE_TO_STABILIZE:float = 1.0                                  # 等待文件稳定的时间
 PROCESS_METHOD:str = ProcessMethod.COPY                                 # 处理文件的方式，可选值：move, copy
