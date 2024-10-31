@@ -108,19 +108,19 @@ class FileProcessor:
                 logger.debug(f"File {file_path} is still changing... Waiting for {waiting_count} times...")
 
     @staticmethod
-    def file_hash(file_path: str) -> str:
+    async def file_hash(file_path: str) -> str:
         if file_path in FileProcessor.hash_cache:
             return FileProcessor.hash_cache[file_path]
 
         file_hash = hashlib.md5()
 
-        def generate_hash():
-            with open(file_path, 'rb') as f:
-                while chunk := f.read(4096):
+        async def generate_hash():
+            async with aiofiles.open(file_path, 'rb') as f:
+                while chunk := await f.read(4096):
                     file_hash.update(chunk)
 
         try:
-            generate_hash()
+            await generate_hash()
         except Exception as e:
             logger.error(f"Failed to generate hash for file {file_path}. Error: {e}")
             return ""
