@@ -2,6 +2,18 @@ class ProcessMethod:
     MOVE = 'move'  # 当文件发生变化时，将文件移动到 MOVE_TO 目录，然后删除源文件
     COPY = 'copy'  # 当文件发生变化时，将文件复制到 MOVE_TO 目录，保留源文件
 
+class SyncFolder:
+    """
+    同步目录, 用于配置源目录和目标目录, 以及是否启用
+    """
+    source_path: str    # 源目录
+    target_path: str    # 目标目录
+    enable_status: bool # 是否启用
+
+    def __init__(self, source_path: str, target_path: str, enable_status: bool):
+        self.source_path = source_path
+        self.target_path = target_path
+        self.enable_status = enable_status
 
 MOVE_TO: [str] = {
     r"C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI",
@@ -13,16 +25,9 @@ WHITELISTED_EXTENSIONS: [str] = ['.jpg', '.jpeg', '.png', '.gif']  # 监听的�
 IGNORED_EXTENSIONS: [str] = ['.txt', '.py', '.md', '.gitignore']  # 忽略的文件扩展名
 IGNORED_DIRECTORIES: [str] = ['__pycache__']  # 忽略的文件夹
 
-SYNC_FOLDER: bool = True  # 是否同步文件夹
-SYNC_FOLDER_PATH_MAP: dict = {
-    # 源目录: 目标目录, 例如: r'A:\ComfyUI_windows_portable\ComfyUI\output': r'C:\Users\solow\OneDrive\Images\Anime\R18'
-    # 如果你有多个源目录需要同一个目标目录，可以这样配置：
-    # r'A:\ComfyUI_windows_portable\ComfyUI\output': r'C:\Users\solow\OneDrive\Images\Anime\R18',
-    # r'A:\ComfyUI_windows_portable\ComfyUI\output2': r'C:\Users\solow\OneDrive\Images\Anime\R18'
-    # 当 SYNC_FOLDER 为 True 时，会将源目录下的文件同步到目标目录，不会删除源文件，只会复制
-
-        r'A:\ComfyUI_windows_portable\ComfyUI\output': r'C:\Users\solow\OneDrive\Images\Anime\R18'
-    }
+SYNC_FOLDER_PATH_MAPPING: [SyncFolder] = [
+    SyncFolder(r'A:\ComfyUI_windows_portable\ComfyUI\output', r'C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI', True),
+    ]
 
 RECURSIVE: bool = True  # 是否递归监听子目录
 MAX_RETRY: int = 3  # 失败时的重试次数
