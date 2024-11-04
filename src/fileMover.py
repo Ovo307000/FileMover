@@ -11,8 +11,9 @@ from watchdog.observers import Observer
 
 import configuration
 
-
 class FileProcessor:
+    # TODO 分离 Configuration
+
     # 用于保存文件移动失败的次数，键值对为文件路径和目标文件夹，值为失败次数
     retries: dict[str, str, int] = {}
 
@@ -20,18 +21,22 @@ class FileProcessor:
     hash_cache: dict[str, str] = {}
 
     @staticmethod
-    async def move_changed_file(file_path: str) -> None:
+    async def move_changed_file(file_path: str, target_directory_list: list[str]) -> None:
         # 等待文件稳定
         await FileProcessor.wait_for_file_to_stabilize(file_path)
 
-        for target_directory in configuration.MOVE_TO:
+        for target_directory in target_directory_list:
             # 如果文件扩展名在白名单中，那么移动文件
             logger.info(f"Checking file {file_path} against whitelist...")
 
-            if file_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS)):
+            if FileProcessor.is_whitelisted(file_path):
                 await FileProcessor.move_file(file_path, target_directory)
             else:
                 logger.info(f"File {file_path} is not in the whitelist. Ignoring.")
+
+    @staticmethod
+    def is_whitelisted(file_path: str) -> bool:
+        return file_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS))
 
     @staticmethod
     async def move_file(file_path: str, target_directory: str) -> None:
@@ -66,7 +71,7 @@ class FileProcessor:
             logger.warning(
                 f"Retrying to move file {file_path} to {target_directory}. Retry count: {retry_count + 1}")
             await asyncio.sleep(configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY)
-            await FileProcessor.move_changed_file(file_path)
+            await FileProcessor.move_changed_file(file_path, target_directory)
         else:
             logger.error(f"Failed to move file {file_path} to {target_directory} after {retry_count} retries. Error: {exception}")
             logger.info(f"Removing file {file_path} from retries list.")
@@ -201,7 +206,8 @@ class DirectoryEventHandler(FileSystemEventHandler):
         # 如果文件是被修改的，且文件扩展名在白名单中，那么移动文件
         if event.src_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS)):
             # 在主线程的事件循环中安全地调度异步任务
-            asyncio.run_coroutine_threadsafe(FileProcessor.move_changed_file(event.src_path), self.loop)
+            asyncio.run_coroutine_threadsafe(FileProcessor.move_changed_file(event.src_path, configuration.MOVE_TO),
+                                             self.loop)
         else:
             logger.info(f"File {event.src_path} is not in the whitelist. Ignoring.")
 
