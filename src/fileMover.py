@@ -3,7 +3,6 @@ import hashlib
 import os
 import shutil
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import aiofiles
 from loguru import logger
@@ -20,7 +19,6 @@ class FileProcessor:
     # 采用 Map 来保存文件的哈希值，键值对为文件路径和哈希值
     hash_cache: dict[str, str] = {}
 
-    executor = ThreadPoolExecutor(max_workers=256)
 
     @staticmethod
     async def move_changed_file(file_path: str) -> None:
@@ -219,11 +217,12 @@ async def monitor_directory():
     try:
         logger.info(f"Monitoring directory {configuration.WATCH_PATH[0]}")
 
+        # TODO
         # 将文件同步操作放入一个异步任务中
-        if configuration.SYNC_FOLDER:
-            logger.info("Starting to sync folders...")
-            for source_folder, target_folder in configuration.SYNC_FOLDER_PATH_MAP.items():
-                asyncio.create_task(FileProcessor.sync_folders(source_folder, target_folder))
+        # if configuration.SYNC_FOLDER:
+        #     logger.info("Starting to sync folders...")
+        #     for source_folder, target_folder in configuration.SYNC_FOLDER_PATH_MAP.items():
+        #         await asy     ncio.create_task(FileProcessor.sync_folders(source_folder, target_folder))
 
         while True:
             await asyncio.sleep(10)  # 保持主线程运行
