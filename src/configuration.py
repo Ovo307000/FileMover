@@ -3,7 +3,10 @@ class ProcessMethod:
     COPY = 'copy'  # 当文件发生变化时，将文件复制到 MOVE_TO 目录，保留源文件
 
 
-MOVE_TO: str = r'C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI'  # 监听到文件变化后，将文件移动到此目录
+MOVE_TO: [str] = {
+    r"C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI",
+    r"C:\Users\solow\OneDrive\Image\Anime",
+}  # 移动到的目录
 WATCH_PATH: [str] = [r'A:\ComfyUI_windows_portable\ComfyUI\output']  # 监听的目录
 
 WHITELISTED_EXTENSIONS: [str] = ['.jpg', '.jpeg', '.png', '.gif']  # 监听的文件扩展名

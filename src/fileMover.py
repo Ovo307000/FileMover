@@ -13,31 +13,41 @@ import configuration
 
 
 class FileProcessor:
-    # 采用 Map 来保存重试次数，键值对为文件路径和重试次数
-    retries: dict[str, int] = {}
+    # 用于保存文件移动失败的次数，键值对为文件路径和目标文件夹，值为失败次数
+    retries: dict[str, str, int] = {}
 
     # 采用 Map 来保存文件的哈希值，键值对为文件路径和哈希值
     hash_cache: dict[str, str] = {}
-
 
     @staticmethod
     async def move_changed_file(file_path: str) -> None:
         # 等待文件稳定
         await FileProcessor.wait_for_file_to_stabilize(file_path)
 
+        for target_directory in configuration.MOVE_TO:
+            # 如果文件扩展名在白名单中，那么移动文件
+            logger.info(f"Checking file {file_path} against whitelist...")
+
+            if file_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS)):
+                await FileProcessor.move_file(file_path, target_directory)
+            else:
+                logger.info(f"File {file_path} is not in the whitelist. Ignoring.")
+
+    @staticmethod
+    async def move_file(file_path: str, target_directory: str) -> None:
         try:
-            logger.info(f"Moving file {file_path} to {configuration.MOVE_TO}")
+            logger.info(f"Moving file {file_path} to {target_directory}")
 
             start_time = time.time()
 
             match configuration.PROCESS_METHOD:
                 case configuration.ProcessMethod.MOVE:
-                    await asyncio.to_thread(shutil.move, file_path, configuration.MOVE_TO, copy_function=shutil.copy2)
+                    await asyncio.to_thread(shutil.move, file_path, target_directory, copy_function=shutil.copy2)
                 case configuration.ProcessMethod.COPY:
-                    await asyncio.to_thread(shutil.copy, file_path, configuration.MOVE_TO)
+                    await asyncio.to_thread(shutil.copy, file_path, target_directory)
 
             logger.info(
-                f"Successfully moved file {file_path} to {configuration.MOVE_TO} in {time.time() - start_time:.2f} seconds")
+                f"Successfully moved file {file_path} to {target_directory} in {time.time() - start_time:.2f} seconds")
 
         except (PermissionError, FileNotFoundError) as file_error:
             logger.error(f"Failed to move file {file_path}. Error: {file_error}")
@@ -49,21 +59,21 @@ class FileProcessor:
 
     @staticmethod
     async def retry_failed_files(file_path: str, exception: Exception) -> None:
-        if FileProcessor.retries.get(file_path, 0) < configuration.MAX_RETRY:
-            FileProcessor.retries[file_path] = FileProcessor.retries.get(file_path, 0) + 1
+        (file_path, target_directory, retry_count) = FileProcessor.retries.get(file_path, 0)
+
+        if retry_count < configuration.MAX_RETRY:
+            FileProcessor.retries[file_path] = (file_path, target_directory, retry_count + 1)
             logger.warning(
-                f"Failed to move file {file_path}.\
-                Because of {exception}, We will retry in {configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY} seconds.\
-                Now retrying {FileProcessor.retries[file_path]}/{configuration.MAX_RETRY}")
+                f"Retrying to move file {file_path} to {target_directory}. Retry count: {retry_count + 1}")
             await asyncio.sleep(configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY)
             await FileProcessor.move_changed_file(file_path)
         else:
-            logger.error(
-                f"After {configuration.MAX_RETRY} retries, failed to move file {file_path}. Error: {exception}")
+            logger.error(f"Failed to move file {file_path} to {target_directory} after {retry_count} retries. Error: {exception}")
+            logger.info(f"Removing file {file_path} from retries list.")
             FileProcessor.retries.pop(file_path)
 
             logger.info(f"Saving failed file {file_path} to failed_files.txt")
-            await FileProcessor.save_failed_file(file_path, exception)
+            await FileProcessor.save_failed_file(file_path, target_directory, exception)
 
     @staticmethod
     def create_directory_if_not_exists(file_path: str) -> None:
@@ -74,12 +84,12 @@ class FileProcessor:
             logger.error(f"Failed to create directory {file_path}. Error: {e}")
 
     @staticmethod
-    async def save_failed_file(file_path: str, e: Exception) -> None:
+    async def save_failed_file(file_path: str, target_directory: str, e: Exception) -> None:
         async with aiofiles.open('failed_files.txt', 'a') as f:
             await f.write(f"""
             [{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}]
              
-             Failed to move file `{file_path}`
+             Failed to move file `{file_path}` to `{target_directory}`.
              Error: {e}
              
              
