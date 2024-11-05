@@ -101,14 +101,14 @@ class FileProcessor:
             """)
 
     @staticmethod
-    async def wait_for_file_to_stabilize(file_path: str) -> bool:
+    async def wait_for_file_to_stabilize(file_path: str, waiting_time: float = configuration.WAIT_FOR_FILE_TO_STABILIZE) -> bool:
         waiting_count = 0
 
         while True:
             # 如果文件大小在等待时间内没有变化，那么认为文件已经稳定
             current_size = os.path.getsize(file_path)
 
-            await asyncio.sleep(configuration.WAIT_FOR_FILE_TO_STABILIZE)
+            await asyncio.sleep(waiting_time)
             logger.debug(f"Waiting for file {file_path} to stabilize...")
             logger.debug(f"Current file size: {current_size}, Previous file size: {os.path.getsize(file_path)}")
 
