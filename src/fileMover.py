@@ -11,6 +11,7 @@ from watchdog.observers import Observer
 
 import configuration
 
+
 class FileProcessor:
     # TODO 分离 Configuration
 
@@ -73,7 +74,8 @@ class FileProcessor:
             await asyncio.sleep(configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY)
             await FileProcessor.move_changed_file(file_path, target_directory)
         else:
-            logger.error(f"Failed to move file {file_path} to {target_directory} after {retry_count} retries. Error: {exception}")
+            logger.error(
+                f"Failed to move file {file_path} to {target_directory} after {retry_count} retries. Error: {exception}")
             logger.info(f"Removing file {file_path} from retries list.")
             FileProcessor.retries.pop(file_path)
 
@@ -101,7 +103,8 @@ class FileProcessor:
             """)
 
     @staticmethod
-    async def wait_for_file_to_stabilize(file_path: str, waiting_time: float = configuration.WAIT_FOR_FILE_TO_STABILIZE) -> bool:
+    async def wait_for_file_to_stabilize(file_path: str,
+                                         waiting_time: float = configuration.WAIT_FOR_FILE_TO_STABILIZE) -> bool:
         waiting_count = 0
 
         while True:
