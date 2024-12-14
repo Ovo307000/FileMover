@@ -16,7 +16,6 @@ class SyncFolder:
         self.enable_status = enable_status
 
 MOVE_TO: [str] = {
-    r"C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI",
     r"C:\Users\solow\OneDrive\Image\Ai",
 }  # 移动到的目录
 WATCH_PATH: [str] = [r'A:\ComfyUI_windows_portable\ComfyUI\output']  # 监听的目录

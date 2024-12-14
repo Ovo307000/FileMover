@@ -235,13 +235,15 @@ async def monitor_directory():
 
     try:
         logger.info(f"Monitoring directory {configuration.WATCH_PATH[0]}")
+        logger.info(f"Move to directory: {configuration.MOVE_TO}")
+        logger.info("Press Ctrl+C to stop the program.")
 
         # TODO
         # 将文件同步操作放入一个异步任务中
         # if configuration.SYNC_FOLDER:
         #     logger.info("Starting to sync folders...")
         #     for source_folder, target_folder in configuration.SYNC_FOLDER_PATH_MAP.items():
-        #         await asy     ncio.create_task(FileProcessor.sync_folders(source_folder, target_folder))
+        #         await asyncio.create_task(FileProcessor.sync_folders(source_folder, target_folder))
 
         while True:
             await asyncio.sleep(10)  # 保持主线程运行
