@@ -1,254 +1,285 @@
+"""
+文件监控和处理模块。
+该模块实现了文件系统监控和自动处理功能，支持文件的移动、复制和失败重试。
+主要功能：
+1. 监控指定目录的文件变化
+2. 根据配置的规则处理新文件
+3. 处理失败时进行重试
+4. 记录处理失败的文件
+"""
+
 import asyncio
 import hashlib
 import os
 import shutil
 import time
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import aiofiles
 from loguru import logger
-from watchdog.events import FileSystemEventHandler, DirModifiedEvent, FileModifiedEvent
+from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 from watchdog.observers import Observer
 
-import configuration
+from configuration import config
+
+
+@dataclass
+class FileState:
+    """
+    文件处理状态的数据类。
+    用于跟踪文件处理过程中的状态信息。
+
+    Attributes:
+        retry_count: 当前重试次数
+        target_directory: 目标目录路径
+        hash_value: 文件的哈希值（用于文件比较）
+    """
+    retry_count: int = 0
+    target_directory: str = ""
+    hash_value: str = ""
 
 
 class FileProcessor:
-    # TODO 分离 Configuration
+    """
+    文件处理器类。
+    负责执行文件的实际处理操作，包括移动、复制、重试等。
+    """
 
-    # 用于保存文件移动失败的次数，键值对为文件路径和目标文件夹，值为失败次数
-    retries: dict[str, str, int] = {}
+    def __init__(self):
+        """初始化文件处理器，创建文件状态字典。"""
+        self._file_states: Dict[str, FileState] = {}
 
-    # 采用 Map 来保存文件的哈希值，键值对为文件路径和哈希值
-    hash_cache: dict[str, str] = {}
+    def get_file_state(self, file_path: str) -> FileState:
+        """
+        获取文件的处理状态，如果不存在则创建新的状态。
 
-    @staticmethod
-    async def move_changed_file(file_path: str, target_directory_list: list[str]) -> None:
-        # 等待文件稳定
-        await FileProcessor.wait_for_file_to_stabilize(file_path)
+        Args:
+            file_path: 文件路径
 
-        for target_directory in target_directory_list:
-            # 如果文件扩展名在白名单中，那么移动文件
-            logger.info(f"Checking file {file_path} against whitelist...")
+        Returns:
+            FileState: 文件的处理状态对象
+        """
+        if file_path not in self._file_states:
+            self._file_states[file_path] = FileState()
+        return self._file_states[file_path]
 
-            if FileProcessor.is_whitelisted(file_path):
-                await FileProcessor.move_file(file_path, target_directory)
-            else:
-                logger.info(f"File {file_path} is not in the whitelist. Ignoring.")
+    async def move_changed_file(self, file_path: str) -> None:
+        """
+        处理变化的文件。
+        等待文件稳定后，根据配置将文件移动或复制到目标目录。
 
-    @staticmethod
-    def is_whitelisted(file_path: str) -> bool:
-        return file_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS))
+        Args:
+            file_path: 要处理的文件路径
+        """
+        if not await self.wait_for_file_to_stabilize(file_path):
+            logger.error(f"File {file_path} failed to stabilize")
+            return
 
-    @staticmethod
-    async def move_file(file_path: str, target_directory: str) -> None:
+        if not self.is_whitelisted(file_path):
+            logger.info(f"File {file_path} is not in the whitelist. Ignoring.")
+            return
+
+        for target_directory in config.path.move_to:
+            await self.move_file(file_path, target_directory)
+
+    def is_whitelisted(self, file_path: str) -> bool:
+        """
+        检查文件是否在白名单中。
+
+        Args:
+            file_path: 要检查的文件路径
+
+        Returns:
+            bool: 如果文件扩展名在白名单中返回 True，否则返回 False
+        """
+        return any(file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
+
+    async def move_file(self, file_path: str, target_directory: str) -> None:
+        """
+        移动或复制文件到目标目录。
+
+        Args:
+            file_path: 源文件路径
+            target_directory: 目标目录路径
+        """
         try:
             logger.info(f"Moving file {file_path} to {target_directory}")
-
             start_time = time.time()
 
-            match configuration.PROCESS_METHOD:
-                case configuration.ProcessMethod.MOVE:
-                    await asyncio.to_thread(shutil.move, file_path, target_directory, copy_function=shutil.copy2)
-                case configuration.ProcessMethod.COPY:
-                    await asyncio.to_thread(shutil.copy, file_path, target_directory)
+            os.makedirs(target_directory, exist_ok=True)
+            target_path = os.path.join(target_directory, os.path.basename(file_path))
+
+            match config.process_method:
+                case config.ProcessMethod.MOVE:
+                    await asyncio.to_thread(shutil.move, file_path, target_path)
+                case config.ProcessMethod.COPY:
+                    await asyncio.to_thread(shutil.copy2, file_path, target_path)
 
             logger.info(
-                f"Successfully moved file {file_path} to {target_directory} in {time.time() - start_time:.2f} seconds")
+                f"Successfully processed file {file_path} to {target_directory} in {time.time() - start_time:.2f} seconds")
 
-        except (PermissionError, FileNotFoundError) as file_error:
-            logger.error(f"Failed to move file {file_path}. Error: {file_error}")
-            await FileProcessor.retry_failed_files(file_path, file_error)
-
+        except (PermissionError, FileNotFoundError) as e:
+            logger.error(f"Failed to process file {file_path}. Error: {e}")
+            await self.handle_failed_file(file_path, target_directory, e)
         except Exception as e:
-            logger.error(f"Failed to move file {file_path}. Error: {e}")
-            FileProcessor.retries.pop(file_path)
+            logger.error(f"Unexpected error while processing {file_path}: {e}")
+            await self.save_failed_file(file_path, target_directory, e)
 
-    @staticmethod
-    async def retry_failed_files(file_path: str, exception: Exception) -> None:
-        (file_path, target_directory, retry_count) = FileProcessor.retries.get(file_path, 0)
+    async def handle_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+        """
+        处理文件处理失败的情况。
+        根据配置的重试策略进行重试，超过重试次数后记录失败信息。
 
-        if retry_count < configuration.MAX_RETRY:
-            FileProcessor.retries[file_path] = (file_path, target_directory, retry_count + 1)
+        Args:
+            file_path: 失败的文件路径
+            target_directory: 目标目录路径
+            error: 导致失败的异常
+        """
+        state = self.get_file_state(file_path)
+
+        if state.retry_count < config.retry.max_retries:
+            state.retry_count += 1
+            state.target_directory = target_directory
+
             logger.warning(
-                f"Retrying to move file {file_path} to {target_directory}. Retry count: {retry_count + 1}")
-            await asyncio.sleep(configuration.WAIT_FOR_FILE_FAILED_TO_MOVE_RETRY)
-            await FileProcessor.move_changed_file(file_path, target_directory)
+                f"Retrying to process file {file_path}. Attempt {state.retry_count}/{config.retry.max_retries}")
+            await asyncio.sleep(config.retry.wait_for_retry)
+            await self.move_changed_file(file_path)
         else:
             logger.error(
-                f"Failed to move file {file_path} to {target_directory} after {retry_count} retries. Error: {exception}")
-            logger.info(f"Removing file {file_path} from retries list.")
-            FileProcessor.retries.pop(file_path)
+                f"Failed to process file {file_path} after {config.retry.max_retries} attempts")
+            await self.save_failed_file(file_path, target_directory, error)
+            self._file_states.pop(file_path, None)
 
-            logger.info(f"Saving failed file {file_path} to failed_files.txt")
-            await FileProcessor.save_failed_file(file_path, target_directory, exception)
+    async def wait_for_file_to_stabilize(self, file_path: str) -> bool:
+        """
+        等待文件大小稳定，用于确保文件写入完成。
 
-    @staticmethod
-    def create_directory_if_not_exists(file_path: str) -> None:
-        try:
-            if not os.path.exists(file_path):
-                os.makedirs(file_path)
-        except Exception as e:
-            logger.error(f"Failed to create directory {file_path}. Error: {e}")
+        Args:
+            file_path: 要监控的文件路径
 
-    @staticmethod
-    async def save_failed_file(file_path: str, target_directory: str, e: Exception) -> None:
+        Returns:
+            bool: 如果文件在超时时间内稳定返回 True，否则返回 False
+        """
+        start_time = time.time()
+        last_size = -1
+
+        while time.time() - start_time < config.retry.move_timeout:
+            try:
+                current_size = os.path.getsize(file_path)
+                if current_size == last_size:
+                    return True
+                last_size = current_size
+                await asyncio.sleep(config.retry.wait_for_stabilize)
+            except OSError as e:
+                logger.error(f"Error checking file size: {e}")
+                return False
+
+        return False
+
+    async def save_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+        """
+        将处理失败的文件信息记录到日志文件。
+
+        Args:
+            file_path: 失败的文件路径
+            target_directory: 目标目录路径
+            error: 导致失败的异常
+        """
         async with aiofiles.open('failed_files.txt', 'a') as f:
-            await f.write(f"""
-            [{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}]
-             
-             Failed to move file `{file_path}` to `{target_directory}`.
-             Error: {e}
-             
-             
-            """)
+            await f.write(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to process {file_path} to {target_directory}: {error}\n"
+            )
 
-    @staticmethod
-    async def wait_for_file_to_stabilize(file_path: str,
-                                         waiting_time: float = configuration.WAIT_FOR_FILE_TO_STABILIZE) -> bool:
-        waiting_count = 0
+    async def get_file_hash(self, file_path: str) -> Optional[str]:
+        """
+        计算文件的 MD5 哈希值。
+        结果会被缓存以提高性能。
 
-        while True:
-            # 如果文件大小在等待时间内没有变化，那么认为文件已经稳定
-            current_size = os.path.getsize(file_path)
+        Args:
+            file_path: 要计算哈希的文件路径
 
-            await asyncio.sleep(waiting_time)
-            logger.debug(f"Waiting for file {file_path} to stabilize...")
-            logger.debug(f"Current file size: {current_size}, Previous file size: {os.path.getsize(file_path)}")
+        Returns:
+            Optional[str]: 文件的 MD5 哈希值，如果计算失败则返回 None
+        """
+        state = self.get_file_state(file_path)
+        if state.hash_value:
+            return state.hash_value
 
-            if current_size == os.path.getsize(file_path):
-                logger.info(
-                    f"I think file `{file_path}` after `{waiting_count}` times `{current_size} bytes` is finally stabilized.")
-                return True
-            else:
-                waiting_count += 1
-                logger.debug(f"File {file_path} is still changing... Waiting for {waiting_count} times...")
-
-    @staticmethod
-    async def file_hash(file_path: str) -> str:
-        if file_path in FileProcessor.hash_cache:
-            return FileProcessor.hash_cache[file_path]
-
-        file_hash = hashlib.md5()
-
-        async def generate_hash():
+        try:
+            file_hash = hashlib.md5()
             async with aiofiles.open(file_path, 'rb') as f:
-                while chunk := await f.read(4096):
+                while chunk := await f.read(8192):
                     file_hash.update(chunk)
 
-        try:
-            await generate_hash()
+            state.hash_value = file_hash.hexdigest()
+            return state.hash_value
         except Exception as e:
-            logger.error(f"Failed to generate hash for file {file_path}. Error: {e}")
-            return ""
-
-        FileProcessor.hash_cache[file_path] = file_hash.hexdigest()
-        return FileProcessor.hash_cache[file_path]
-
-    @staticmethod
-    async def sync_folders(source_folder: str, target_folder: str) -> None:
-        copied_files_count = 0
-        copied_directories_count = 0
-        start_time = time.time()
-
-        # 如果目标文件夹不存在，则创建它
-        FileProcessor.create_directory_if_not_exists(target_folder)
-
-        tasks = []  # 用于存储异步任务
-
-        # 复制源文件夹的内容到目标文件夹
-        for item in os.listdir(source_folder):
-            source_path = os.path.join(source_folder, item)
-            target_path = os.path.join(target_folder, item)
-
-            # 如果是文件，且文件扩展名在白名单中，且文件哈希值不同，那么复制文件
-            if (os.path.isfile(source_path)
-                    and source_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS))):
-                tasks.append(FileProcessor.handle_file_copy(source_path, target_path))
-
-            # 如果是目录，递归复制
-            elif os.path.isdir(source_path):
-                tasks.append(FileProcessor.sync_folders(source_path, target_path))
-
-        results = await asyncio.gather(*tasks)  # 并行执行任务
-
-        # 统计复制的文件和目录数量
-        for result in results:
-            if isinstance(result, tuple):
-                copied_files_count += result[0]
-                copied_directories_count += result[1]
-
-        logger.info(
-            f"Successfully copied {copied_files_count} files and {copied_directories_count} directories from {source_folder} to {target_folder}")
-        logger.info(f"Time taken: {time.time() - start_time:.2f} seconds")
-
-    @staticmethod
-    async def handle_file_copy(source_path: str, target_path: str) -> tuple:
-        source_path_hash = FileProcessor.file_hash(source_path)
-        target_path_hash = FileProcessor.file_hash(target_path)
-
-        # 如果源文件和目标文件的哈希值不同，那么复制文件
-        if source_path_hash != target_path_hash:
-            logger.info(f"Copying file {source_path} to {target_path}")
-            await asyncio.to_thread(shutil.copy, source_path, target_path)
-            return 1, 0  # 返回复制的文件和目录数量
-        return 0, 0  # 没有复制的文件和目录数量
+            logger.error(f"Failed to generate hash for {file_path}: {e}")
+            return None
 
 
 class DirectoryEventHandler(FileSystemEventHandler):
-    def __init__(self, loop):
-        super().__init__()
-        self.loop = loop  # 保存事件循环
+    """
+    目录事件处理器。
+    监听文件系统事件并触发相应的处理操作。
+    """
 
-    def on_created(self, event: DirModifiedEvent | FileModifiedEvent) -> None:
+    def __init__(self, processor: FileProcessor, loop: asyncio.AbstractEventLoop):
+        """
+        初始化事件处理器。
+
+        Args:
+            processor: 文件处理器实例
+            loop: 事件循环实例
+        """
+        super().__init__()
+        self.processor = processor
+        self.loop = loop
+
+    def on_created(self, event: FileModifiedEvent) -> None:
+        """
+        处理文件创建事件。
+        当新文件创建时，将其加入处理队列。
+
+        Args:
+            event: 文件系统事件对象
+        """
         if event.is_directory:
-            logger.debug(f"Directory modified: {event.src_path} but we are not interested in directories :(")
             return
 
-        logger.info(f"File {event.src_path} has been {event.event_type}")
-
-        # 如果文件是被修改的，且文件扩展名在白名单中，那么移动文件
-        if event.src_path.endswith(tuple(configuration.WHITELISTED_EXTENSIONS)):
-            # 在主线程的事件循环中安全地调度异步任务
-            asyncio.run_coroutine_threadsafe(FileProcessor.move_changed_file(event.src_path, configuration.MOVE_TO),
-                                             self.loop)
-        else:
-            logger.info(f"File {event.src_path} is not in the whitelist. Ignoring.")
+        logger.info(f"File {event.src_path} has been created")
+        asyncio.run_coroutine_threadsafe(
+            self.processor.move_changed_file(event.src_path),
+            self.loop
+        )
 
 
-async def monitor_directory():
-    event_loop = asyncio.get_running_loop()  # 获取当前事件循环
-    observer = Observer()  # 创建观察者对象，用于监视文件系统变化
+async def monitor_directory() -> None:
+    """
+    启动目录监控。
+    创建文件处理器和观察者，开始监控配置的目录。
+    """
+    processor = FileProcessor()
+    event_loop = asyncio.get_running_loop()
+    observer = Observer()
 
-    for directory in configuration.WATCH_PATH:
-        # 创建目录，为了避免在移动文件时出现目录不存在的错误
-        FileProcessor.create_directory_if_not_exists(directory)
-        # 创建事件处理器，用于处理文件系统事件
-        event_handler = DirectoryEventHandler(event_loop)
+    for watch_path in config.path.watch_paths:
+        if not os.path.exists(watch_path):
+            os.makedirs(watch_path)
 
-        # 根据配置递归或非递归地监视目录，然后将事件处理器添加到观察者对象中
-        if configuration.RECURSIVE:
-            observer.schedule(event_handler, directory, recursive=True)
-        else:
-            observer.schedule(event_handler, directory, recursive=False)
+        event_handler = DirectoryEventHandler(processor, event_loop)
+        observer.schedule(event_handler, watch_path, recursive=config.recursive)
 
     observer.start()
 
     try:
-        logger.info(f"Monitoring directory {configuration.WATCH_PATH[0]}")
-        logger.info(f"Move to directory: {configuration.MOVE_TO}")
-        logger.info("Press Ctrl+C to stop the program.")
-
-        # TODO
-        # 将文件同步操作放入一个异步任务中
-        # if configuration.SYNC_FOLDER:
-        #     logger.info("Starting to sync folders...")
-        #     for source_folder, target_folder in configuration.SYNC_FOLDER_PATH_MAP.items():
-        #         await asyncio.create_task(FileProcessor.sync_folders(source_folder, target_folder))
+        logger.info(f"Monitoring directories: {', '.join(config.path.watch_paths)}")
+        logger.info(f"Target directories: {', '.join(config.path.move_to)}")
 
         while True:
-            await asyncio.sleep(10)  # 保持主线程运行
-
-            logger.debug("Main thread is still running...")
+            await asyncio.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
@@ -256,5 +287,4 @@ async def monitor_directory():
 
 if __name__ == '__main__':
     logger.info("Starting file mover...")
-
     asyncio.run(monitor_directory())
