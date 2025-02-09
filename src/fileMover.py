@@ -34,7 +34,7 @@ class FileProcessor:
         """初始化文件处理器，创建文件状态字典。"""
         self._file_tracking_dict: Dict[str, FileStatus] = {}
 
-    def get_file_status(self, file_path: str) -> FileStatus:
+    def obtain_file_status(self, source_file_path: str) -> FileStatus:
         """
         获取文件的处理状态，如果不存在则创建新的状态。
         Args:
@@ -138,7 +138,7 @@ class FileProcessor:
             target_directory: 目标目录路径
             error: 导致失败的异常
         """
-        status = self.get_file_status(file_path)
+        status = self.obtain_file_status(file_path)
 
         if status.retry_count < config.retry.max_retries:
             status.retry_count += 1
@@ -153,12 +153,12 @@ class FileProcessor:
             await self.save_failed_file(file_path, target_directory, error)
             self._file_tracking_dict.pop(file_path, None)
 
-    async def wait_for_file_to_stabilize(self, file_path: str) -> bool:
+    async def wait_for_file_to_stabilize(self, source_file_path: str) -> bool:
         """
         等待文件大小稳定，用于确保文件写入完成。
 
         Args:
-            file_path: 要监控的文件路径
+            source_file_path: 要监控的文件路径
 
         Returns:
             bool: 如果文件在超时时间内稳定返回 True，否则返回 False
@@ -168,7 +168,7 @@ class FileProcessor:
 
         while time.time() - start_time < config.retry.move_timeout:
             try:
-                current_size = os.path.getsize(file_path)
+                current_size = os.path.getsize(source_file_path)
                 if current_size == last_size:
                     return True
                 last_size = current_size
@@ -179,7 +179,7 @@ class FileProcessor:
 
         return False
 
-    async def save_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+    async def save_failed_file(self, source_file_path: str, target_directory: str, error: Exception) -> None:
         """
         将处理失败的文件信息记录到日志文件。
 
@@ -190,33 +190,33 @@ class FileProcessor:
         """
         async with aiofiles.open('failed_files.txt', 'a') as f:
             await f.write(
-                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to process {file_path} to {target_directory}: {error}\n")
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to process {source_file_path} to {target_directory}: {error}\n")
 
-    async def get_file_hash(self, file_path: str) -> Optional[str]:
+    async def get_file_hash(self, source_file_path: str) -> Optional[str]:
         """
         计算文件的 MD5 哈希值。
         结果会被缓存以提高性能。
 
         Args:
-            file_path: 要计算哈希的文件路径
+            source_file_path: 要计算哈希的文件路径
 
         Returns:
             Optional[str]: 文件的 MD5 哈希值，如果计算失败则返回 None
         """
-        status = self.get_file_status(file_path)
+        status = self.obtain_file_status(source_file_path)
         if status.hash_value:
             return status.hash_value
 
         try:
             file_hash = hashlib.md5()
-            async with aiofiles.open(file_path, 'rb') as f:
+            async with aiofiles.open(source_file_path, 'rb') as f:
                 while chunk := await f.read(8192):
                     file_hash.update(chunk)
 
             status.hash_value = file_hash.hexdigest()
             return status.hash_value
         except Exception as e:
-            logger.error(f"Failed to generate hash for {file_path}: {e}")
+            logger.error(f"Failed to generate hash for {source_file_path}: {e}")
             return None
 
 
