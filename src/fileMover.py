@@ -78,7 +78,7 @@ class FileProcessor:
         Returns:
             bool: 如果文件扩展名在白名单中返回 True，否则返回 False
         """
-        return any(source_file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
+        return any(source_file_path.endswith(whitelisted_extension) for whitelisted_extension in config.file.whitelisted_extensions)
 
     async def move_file(self, source_file_path: str, target_file_paths: List[str], process_type: ProcessMethod) -> None:
         """
