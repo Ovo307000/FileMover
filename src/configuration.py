@@ -23,15 +23,15 @@ class SyncFolder:
     """
     同步目录的配置类。
     用于定义源目录和目标目录之间的同步关系。
-    
+
     Attributes:
         source_path: 源目录的路径
         target_path: 目标目录的路径
         enable_status: 是否启用该同步配置
     """
-    source_path: str  # 源目录路径
-    target_path: str  # 目标目录路径
-    enable_status: bool  # 是否启用该配置
+    source_path: List[str]  # 源目录路径
+    target_path: List[str]  # 目标目录路径
+    enable_status: bool     # 是否启用该配置
 
 
 @dataclass
@@ -39,15 +39,15 @@ class FileConfig:
     """
     文件处理的相关配置。
     定义了文件处理的过滤规则，包括白名单和黑名单。
-    
+
     Attributes:
         whitelisted_extensions: 允许处理的文件扩展名集合
         ignored_extensions: 需要忽略的文件扩展名集合
         ignored_directories: 需要忽略的目录名集合
     """
-    whitelisted_extensions: Set[str] = frozenset({'.jpg', '.jpeg', '.png', '.gif'})
-    ignored_extensions: Set[str] = frozenset({'.txt', '.py', '.md', '.gitignore'})
-    ignored_directories: Set[str] = frozenset({'__pycache__'})
+    whitelisted_extensions: Set[str] = field(default_factory=lambda: {'.jpg', '.jpeg', '.png', '.gif'})
+    ignored_extensions: Set[str] = field(default_factory=lambda: {'.txt', '.py', '.md', '.gitignore'})
+    ignored_directories: Set[str] = field(default_factory=lambda: {'__pycache__'})
 
 
 @dataclass
@@ -55,19 +55,19 @@ class PathConfig:
     """
     路径相关的配置。
     定义了文件监控和处理的路径配置。
-    
+
     Attributes:
         move_to: 文件处理后的目标目录集合
         watch_paths: 需要监控的源目录列表
         sync_folders: 需要同步的目录配置列表
     """
-    move_to: Set[str] = frozenset({r"C:\Users\solow\OneDrive\Image\Ai"})
+    move_to: Set[str] = field(default_factory=lambda: {r"C:\Users\solow\OneDrive\Image\Ai"})
     watch_paths: List[str] = field(default_factory=lambda: [r'A:\ComfyUI_windows_portable\ComfyUI\output'])
     sync_folders: List[SyncFolder] = field(default_factory=lambda: [
         SyncFolder(
-            r'A:\ComfyUI_windows_portable\ComfyUI\output',
-            r'C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI',
-            True
+            source_path=[r'A:\ComfyUI_windows_portable\ComfyUI\output'],
+            target_path=[r'C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI'],
+            enable_status=True
         )
     ])
 
@@ -77,7 +77,7 @@ class RetryConfig:
     """
     重试策略的配置。
     定义了文件处理失败时的重试行为。
-    
+
     Attributes:
         max_retries: 最大重试次数
         wait_for_retry: 重试之间的等待时间（秒）
@@ -95,7 +95,7 @@ class Config:
     """
     全局配置类。
     整合了所有配置项，提供了一个统一的配置接口。
-    
+
     Attributes:
         file: 文件处理相关的配置
         path: 路径相关的配置
