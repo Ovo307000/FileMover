@@ -164,19 +164,22 @@ class FileProcessor:
         Returns:
             bool: 如果文件在超时时间内稳定返回 True，否则返回 False
         """
-        start_time = time.time()
-        last_size = -1
+        try:
+            previous_file_size = os.path.getsize(source_file_path)
+            end_time = time.time() + config.retry.move_timeout
 
-        while time.time() - start_time < config.retry.move_timeout:
-            try:
-                current_size = os.path.getsize(source_file_path)
-                if current_size == last_size:
-                    return True
-                last_size = current_size
+            while time.time() < end_time:
                 await asyncio.sleep(config.retry.wait_for_stabilize)
-            except OSError as e:
-                logger.error(f"Error checking file size: {e}")
-                return False
+                current_file_size = os.path.getsize(source_file_path)
+
+                # 如果文件大小没有变化，则认为文件稳定, 返回 True, 否则更新上次文件大小, 用于下次比较
+                if current_file_size == previous_file_size:
+                    return True
+                else:
+                    previous_file_size = current_file_size
+
+            # 如果文件大小一直在变化，则认为文件不稳定, 返回 False
+            return False
 
         return False
 
