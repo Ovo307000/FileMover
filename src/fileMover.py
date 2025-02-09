@@ -13,7 +13,6 @@ import hashlib
 import os
 import shutil
 import time
-from dataclasses import dataclass
 from typing import Dict, Optional
 
 import aiofiles
@@ -22,22 +21,7 @@ from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 from watchdog.observers import Observer
 
 from configuration import config
-
-
-@dataclass
-class FileState:
-    """
-    文件处理状态的数据类。
-    用于跟踪文件处理过程中的状态信息。
-
-    Attributes:
-        retry_count: 当前重试次数
-        target_directory: 目标目录路径
-        hash_value: 文件的哈希值（用于文件比较）
-    """
-    retry_count: int = 0
-    target_directory: str = ""
-    hash_value: str = ""
+from file.FileStatus import FileStatus
 
 
 class FileProcessor:
@@ -48,9 +32,9 @@ class FileProcessor:
 
     def __init__(self):
         """初始化文件处理器，创建文件状态字典。"""
-        self._file_states: Dict[str, FileState] = {}
+        self._file_tracking_dict: Dict[str, FileStatus] = {}
 
-    def get_file_state(self, file_path: str) -> FileState:
+    def get_file_status(self, file_path: str) -> FileStatus:
         """
         获取文件的处理状态，如果不存在则创建新的状态。
 
@@ -60,9 +44,9 @@ class FileProcessor:
         Returns:
             FileState: 文件的处理状态对象
         """
-        if file_path not in self._file_states:
-            self._file_states[file_path] = FileState()
-        return self._file_states[file_path]
+        if file_path not in self._file_tracking_dict:
+            self._file_tracking_dict[file_path] = FileStatus()
+        return self._file_tracking_dict[file_path]
 
     async def move_changed_file(self, file_path: str) -> None:
         """
@@ -93,7 +77,8 @@ class FileProcessor:
         Returns:
             bool: 如果文件扩展名在白名单中返回 True，否则返回 False
         """
-        return any(file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
+        return any(
+            file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
 
     async def move_file(self, file_path: str, target_directory: str) -> None:
         """
@@ -126,7 +111,8 @@ class FileProcessor:
             logger.error(f"Unexpected error while processing {file_path}: {e}")
             await self.save_failed_file(file_path, target_directory, e)
 
-    async def handle_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+    async def handle_failed_file(self, file_path: str, target_directory: str,
+                                 error: Exception) -> None:
         """
         处理文件处理失败的情况。
         根据配置的重试策略进行重试，超过重试次数后记录失败信息。
@@ -136,21 +122,21 @@ class FileProcessor:
             target_directory: 目标目录路径
             error: 导致失败的异常
         """
-        state = self.get_file_state(file_path)
+        status = self.get_file_status(file_path)
 
-        if state.retry_count < config.retry.max_retries:
-            state.retry_count += 1
-            state.target_directory = target_directory
+        if status.retry_count < config.retry.max_retries:
+            status.retry_count += 1
+            status.target_directory = target_directory
 
             logger.warning(
-                f"Retrying to process file {file_path}. Attempt {state.retry_count}/{config.retry.max_retries}")
+                f"Retrying to process file {file_path}. Attempt {status.retry_count}/{config.retry.max_retries}")
             await asyncio.sleep(config.retry.wait_for_retry)
             await self.move_changed_file(file_path)
         else:
             logger.error(
                 f"Failed to process file {file_path} after {config.retry.max_retries} attempts")
             await self.save_failed_file(file_path, target_directory, error)
-            self._file_states.pop(file_path, None)
+            self._file_tracking_dict.pop(file_path, None)
 
     async def wait_for_file_to_stabilize(self, file_path: str) -> bool:
         """
@@ -178,7 +164,8 @@ class FileProcessor:
 
         return False
 
-    async def save_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+    async def save_failed_file(self, file_path: str, target_directory: str,
+                               error: Exception) -> None:
         """
         将处理失败的文件信息记录到日志文件。
 
@@ -203,9 +190,9 @@ class FileProcessor:
         Returns:
             Optional[str]: 文件的 MD5 哈希值，如果计算失败则返回 None
         """
-        state = self.get_file_state(file_path)
-        if state.hash_value:
-            return state.hash_value
+        status = self.get_file_status(file_path)
+        if status.hash_value:
+            return status.hash_value
 
         try:
             file_hash = hashlib.md5()
@@ -213,8 +200,8 @@ class FileProcessor:
                 while chunk := await f.read(8192):
                     file_hash.update(chunk)
 
-            state.hash_value = file_hash.hexdigest()
-            return state.hash_value
+            status.hash_value = file_hash.hexdigest()
+            return status.hash_value
         except Exception as e:
             logger.error(f"Failed to generate hash for {file_path}: {e}")
             return None
