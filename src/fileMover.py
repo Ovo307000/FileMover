@@ -47,7 +47,7 @@ class FileProcessor:
 
         return self._file_tracking_dict[source_file_path]
 
-    async def move_changed_file(self, source_file_path: str) -> None:
+    async def move_verified_file(self, source_file_path: str) -> None:
         """
         处理变化的文件。
         等待文件稳定后，根据配置将文件移动或复制到目标目录。
@@ -61,14 +61,14 @@ class FileProcessor:
             return
 
         # 判断是否白名单内，喵，如果文件类型不允许，就不屑处理啦
-        if not self.is_whitelisted(source_file_path):
+        if not self.is_file_in_whitelist(source_file_path):
             logger.info(f"File {source_file_path} is not in the whitelist. Ignoring.")
             return
 
         # 从配置中获取目标目录列表（转换为List）并调用 move_file 进行移动操作
-        await self.move_file(source_file_path, list(config.path.move_to), ProcessMethod.MOVE)
+        await self.copy_or_move_file(source_file_path, list(config.path.move_to), ProcessMethod.MOVE)
 
-    def is_whitelisted(self, source_file_path: str) -> bool:
+    def is_file_in_whitelist(self, source_file_path: str) -> bool:
         """
         检查文件是否在白名单中。
 
@@ -80,7 +80,7 @@ class FileProcessor:
         """
         return any(source_file_path.endswith(whitelisted_extension) for whitelisted_extension in config.file.whitelisted_extensions)
 
-    async def move_file(self, source_file_path: str, target_file_paths: List[str], process_type: ProcessMethod) -> None:
+    async def copy_or_move_file(self, source_file_path: str, target_file_paths: List[str], process_type: ProcessMethod) -> None:
         """
         移动或复制文件到目标目录。
 
@@ -130,29 +130,31 @@ class FileProcessor:
                 logger.info(
                     f"Successfully copied file {source_file_path} to {target_directory} in {time.time() - start_time:.2f} seconds")
 
-    async def handle_failed_file(self, file_path: str, target_directory: str, error: Exception) -> None:
+    async def handle_failed_file(self, source_file_path: str, target_directory: str, error: Exception) -> None:
         """
         处理文件处理失败的情况，根据配置的重试策略进行重试，超过重试次数后记录失败信息。
 
         Args:
-            file_path: 失败的文件路径
+            source_file_path: 失败的文件路径
             target_directory: 目标目录路径
             error: 导致失败的异常
         """
-        status = self.obtain_file_status(file_path)
+        status = self.obtain_file_status(source_file_path)
 
         if status.retry_count < config.retry.max_retries:
             status.retry_count += 1
             status.target_directory = target_directory
+
             logger.warning(
-                f"Retrying to process file {file_path}. Attempt {status.retry_count}/{config.retry.max_retries}")
+                f"Retrying to process file {source_file_path}. Attempt {status.retry_count}/{config.retry.max_retries}")
+
             await asyncio.sleep(config.retry.wait_for_retry)
             # 直接重试整个处理流程
-            await self.move_changed_file(file_path)
+            await self.move_verified_file(source_file_path)
         else:
-            logger.error(f"Failed to process file {file_path} after {config.retry.max_retries} attempts")
-            await self.save_failed_file(file_path, target_directory, error)
-            self._file_tracking_dict.pop(file_path, None)
+            logger.error(f"Failed to process file {source_file_path} after {config.retry.max_retries} attempts")
+            await self.save_failed_file(source_file_path, target_directory, error)
+            self._file_tracking_dict.pop(source_file_path, None)
 
     async def wait_for_file_to_stabilize(self, source_file_path: str) -> bool:
         """
@@ -181,14 +183,19 @@ class FileProcessor:
             # 如果文件大小一直在变化，则认为文件不稳定, 返回 False
             return False
 
-        return False
+        except OSError as exception:
+            logger.error(f"Error checking file size: {exception}")
+            return False
+        except Exception as exception:
+            logger.error(f"Unexpected error while waiting for file to stabilize: {exception}")
+            return False
 
     async def save_failed_file(self, source_file_path: str, target_directory: str, error: Exception) -> None:
         """
         将处理失败的文件信息记录到日志文件。
 
         Args:
-            file_path: 失败的文件路径
+            source_file_path: 失败的文件路径
             target_directory: 目标目录路径
             error: 导致失败的异常
         """
@@ -252,7 +259,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
             return
 
         logger.info(f"File {event.src_path} has been created")
-        asyncio.run_coroutine_threadsafe(self.processor.move_changed_file(event.src_path), self.loop)
+        asyncio.run_coroutine_threadsafe(self.processor.move_verified_file(event.src_path), self.loop)
 
     async def on_modified(self, event: FileModifiedEvent) -> None:
         """
