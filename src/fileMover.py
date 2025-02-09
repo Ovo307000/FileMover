@@ -55,14 +55,14 @@ class FileProcessor:
         Args:
             source_file_path: 要处理的文件路径
         """
-        # 检查文件是否稳定，防止处理未写完的文件
-        if not await self.wait_for_file_to_stabilize(source_file_path):
-            logger.error(f"File {source_file_path} failed to stabilize")
-            return
-
         # 判断是否白名单内，喵，如果文件类型不允许，就不屑处理啦
         if not self.is_file_in_whitelist(source_file_path):
             logger.info(f"File {source_file_path} is not in the whitelist. Ignoring.")
+            return
+
+        # 检查文件是否稳定，防止处理未写完的文件
+        if not await self.wait_for_file_to_stabilize(source_file_path):
+            logger.error(f"File {source_file_path} failed to stabilize")
             return
 
         # 从配置中获取目标目录列表（转换为List）并调用 move_file 进行移动操作
