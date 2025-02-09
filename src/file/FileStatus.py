@@ -14,4 +14,3 @@ class FileStatus:
     """
     retry_count: int = 0
     target_directory: str = ""
-    hash_value: str = ""

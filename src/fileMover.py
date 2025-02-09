@@ -24,6 +24,7 @@ from configuration import ProcessMethod, config
 from file.FileStatus import FileStatus
 
 
+
 class FileProcessor:
     """
     文件处理器类。
@@ -65,8 +66,8 @@ class FileProcessor:
             logger.error(f"File {source_file_path} failed to stabilize")
             return
 
-        # 从配置中获取目标目录列表（转换为List）并调用 move_file 进行移动操作
-        await self.copy_or_move_file(source_file_path, list(config.path.move_to), ProcessMethod.MOVE)
+        # 从配置中获取目标目录列表, 并调用 copy_or_move_file 根据配置进行移动或复制操作
+        await self.copy_or_move_file(source_file_path, config.path.move_to, ProcessMethod.MOVE)
 
     def is_file_in_whitelist(self, source_file_path: str) -> bool:
         """

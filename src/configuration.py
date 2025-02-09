@@ -45,9 +45,9 @@ class FileConfig:
         ignored_extensions: 需要忽略的文件扩展名集合
         ignored_directories: 需要忽略的目录名集合
     """
-    whitelisted_extensions: Set[str] = field(default_factory=lambda: {'.jpg', '.jpeg', '.png', '.gif'})
-    ignored_extensions: Set[str] = field(default_factory=lambda: {'.txt', '.py', '.md', '.gitignore'})
-    ignored_directories: Set[str] = field(default_factory=lambda: {'__pycache__'})
+    whitelisted_extensions: List[str] = field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.gif'])
+    ignored_extensions: List[str] = field(default_factory=lambda: ['.txt', '.py', '.md', '.gitignore'])
+    ignored_directories: List[str] = field(default_factory=lambda: ['__pycache__'])
 
 
 @dataclass
@@ -61,16 +61,8 @@ class PathConfig:
         watch_paths: 需要监控的源目录列表
         sync_folders: 需要同步的目录配置列表
     """
-    move_to: Set[str] = field(default_factory=lambda: {r"C:\Users\solow\OneDrive\Image\Ai"})
     watch_paths: List[str] = field(default_factory=lambda: [r'A:\ComfyUI_windows_portable\ComfyUI\output'])
-    sync_folders: List[SyncFolder] = field(default_factory=lambda: [
-        SyncFolder(
-            source_path=[r'A:\ComfyUI_windows_portable\ComfyUI\output'],
-            target_path=[r'C:\Users\solow\OneDrive\个人保管库\Images\R18\Anime\AI'],
-            enable_status=True
-        )
-    ])
-
+    move_to: List[str] = field(default_factory=lambda: [r'F:\Lib\Pictures\Anime - 副本'])
 
 @dataclass
 class RetryConfig:
