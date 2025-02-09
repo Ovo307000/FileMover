@@ -38,46 +38,47 @@ class FileProcessor:
         """
         获取文件的处理状态，如果不存在则创建新的状态。
         Args:
-            file_path: 文件路径
+            source_file_path: 源文件路径
         Returns:
             FileStatus: 文件的处理状态对象
         """
-        if file_path not in self._file_tracking_dict:
-            self._file_tracking_dict[file_path] = FileStatus()
-        return self._file_tracking_dict[file_path]
+        if source_file_path not in self._file_tracking_dict:
+            self._file_tracking_dict[source_file_path] = FileStatus()
 
-    async def move_changed_file(self, file_path: str) -> None:
+        return self._file_tracking_dict[source_file_path]
+
+    async def move_changed_file(self, source_file_path: str) -> None:
         """
         处理变化的文件。
         等待文件稳定后，根据配置将文件移动或复制到目标目录。
 
         Args:
-            file_path: 要处理的文件路径
+            source_file_path: 要处理的文件路径
         """
         # 检查文件是否稳定，防止处理未写完的文件
-        if not await self.wait_for_file_to_stabilize(file_path):
-            logger.error(f"File {file_path} failed to stabilize")
+        if not await self.wait_for_file_to_stabilize(source_file_path):
+            logger.error(f"File {source_file_path} failed to stabilize")
             return
 
         # 判断是否白名单内，喵，如果文件类型不允许，就不屑处理啦
-        if not self.is_whitelisted(file_path):
-            logger.info(f"File {file_path} is not in the whitelist. Ignoring.")
+        if not self.is_whitelisted(source_file_path):
+            logger.info(f"File {source_file_path} is not in the whitelist. Ignoring.")
             return
 
         # 从配置中获取目标目录列表（转换为List）并调用 move_file 进行移动操作
-        await self.move_file(file_path, list(config.path.move_to), ProcessMethod.MOVE)
+        await self.move_file(source_file_path, list(config.path.move_to), ProcessMethod.MOVE)
 
-    def is_whitelisted(self, file_path: str) -> bool:
+    def is_whitelisted(self, source_file_path: str) -> bool:
         """
         检查文件是否在白名单中。
 
         Args:
-            file_path: 要检查的文件路径
+            source_file_path: 要检查的文件路径
 
         Returns:
             bool: 如果文件扩展名在白名单中返回 True，否则返回 False
         """
-        return any(file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
+        return any(source_file_path.endswith(ext) for ext in config.file.whitelisted_extensions)
 
     async def move_file(self, source_file_path: str, target_file_paths: List[str], process_type: ProcessMethod) -> None:
         """
