@@ -215,8 +215,8 @@ class FileProcessor:
 
             status.hash_value = file_hash.hexdigest()
             return status.hash_value
-        except Exception as e:
-            logger.error(f"Failed to generate hash for {source_file_path}: {e}")
+        except Exception as exception:
+            logger.error(f"Failed to generate hash for {source_file_path}: {exception}")
             return None
 
 
