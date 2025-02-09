@@ -1,1 +1,3 @@
 ./src/failed_files.txt
+.idea
+.vscode
