@@ -159,7 +159,7 @@ class FileProcessor:
             self._file_tracking_dict.pop(source_file_path, None)
 
     async def get_file_hash(self, source_file_path: str, buffer_size: int = 1024 * 1024,
-                            maximum_chunk_limit: int = 10 * 1024 * 1024) -> str:
+                               maximum_chunk_limit: int = 10 * 1024 * 1024) -> str:
         """
         获取文件的哈希值。
         使用分片读取以降低大文件内存。
@@ -172,21 +172,24 @@ class FileProcessor:
         Returns:
             str: 文件的哈希值
         """
-        hasher = hashlib.md5()
+        # 使用 MD5 哈希算法计算文件的哈希值，因为并不涉及安全性，所以使用 MD5，速度更快
+        md5_hasher = hashlib.md5()
         file_size = os.path.getsize(source_file_path)
 
         async with aiofiles.open(source_file_path, mode='rb') as file_object:  # 打开文件
-            if file_size > maximum_chunk_limit:  # 如果文件大于10MB，则采用分片读取，懒得一次加载全部
+            if file_size > maximum_chunk_limit:
+                # 针对大文件，采用优雅的分块读取策略，避免过于庞大的内存占用
                 while True:
-                    buffer_slice = await file_object.read(buffer_size)
-                    if not buffer_slice:
+                    file_segment = await file_object.read(buffer_size)
+                    if not file_segment:
                         break
-                    hasher.update(buffer_slice)
+                    md5_hasher.update(file_segment)
             else:
-                file_content = await file_object.read()  # 小文件就直接读取吧
-                hasher.update(file_content)
+                # 小文件就直接全读，简单明了
+                content = await file_object.read()
+                md5_hasher.update(content)
 
-        return hasher.hexdigest()
+        return md5_hasher.hexdigest()
 
     async def wait_for_file_to_stabilize(self, source_file_path: str) -> bool:
         """
