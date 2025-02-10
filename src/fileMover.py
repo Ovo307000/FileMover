@@ -13,7 +13,7 @@ import hashlib
 import os
 import shutil
 import time
-from typing import Dict, Optional, List
+from typing import Dict, List
 
 import aiofiles
 from loguru import logger
@@ -22,7 +22,6 @@ from watchdog.observers import Observer
 
 from configuration import ProcessMethod, config
 from file.FileStatus import FileStatus
-
 
 
 class FileProcessor:
@@ -67,7 +66,7 @@ class FileProcessor:
             return
 
         # 从配置中获取目标目录列表, 并调用 copy_or_move_file 根据配置进行移动或复制操作
-        await self.copy_or_move_file(source_file_path, config.path.move_to, ProcessMethod.MOVE)
+        await self.copy_or_move_file(source_file_path, config.path.target_directory_list, ProcessMethod.MOVE)
 
     def is_file_in_whitelist(self, source_file_path: str) -> bool:
         """
@@ -79,9 +78,11 @@ class FileProcessor:
         Returns:
             bool: 如果文件扩展名在白名单中返回 True，否则返回 False
         """
-        return any(source_file_path.endswith(whitelisted_extension) for whitelisted_extension in config.file.whitelisted_extensions)
+        return any(source_file_path.endswith(whitelisted_extension) for whitelisted_extension in
+                   config.file.whitelisted_extensions)
 
-    async def copy_or_move_file(self, source_file_path: str, target_file_paths: List[str], process_type: ProcessMethod) -> None:
+    async def copy_or_move_file(self, source_file_path: str, target_file_paths: List[str],
+                                process_type: ProcessMethod) -> None:
         """
         移动或复制文件到目标目录。
 
@@ -109,8 +110,8 @@ class FileProcessor:
     async def process_file_movement(self, source_file_path: str, target_directory: str,
                                     process_type: ProcessMethod) -> None:
         """
-        处理文件移动操作。
-        将文件移动到目标目录。
+            处理文件移动操作。
+            将文件移动到目标目录。
 
         Args:
             source_file_path: 源文件路径
@@ -123,7 +124,7 @@ class FileProcessor:
 
         match process_type:
             case ProcessMethod.MOVE:
-                await asyncio.to_thread(shutil.move, source_file_path, target_path)
+                await asyncio.to_thread(shutil.move, source_file_path, target_path,copy_function = shutil.copy2)
                 logger.info(
                     f"Successfully moved file {source_file_path} to {target_directory} in {time.time() - start_time:.2f} seconds")
             case ProcessMethod.COPY:
@@ -157,9 +158,39 @@ class FileProcessor:
             await self.save_failed_file(source_file_path, target_directory, error)
             self._file_tracking_dict.pop(source_file_path, None)
 
+    async def get_file_hash(self, source_file_path: str, buffer_size: int = 1024 * 1024,
+                            maximum_chunk_limit: int = 10 * 1024 * 1024) -> str:
+        """
+        获取文件的哈希值。
+        使用分片读取以降低大文件内存。
+
+        Args:
+            source_file_path: 要获取哈希值的文件路径
+            buffer_size: 每次读取的缓冲区大小 默认1MB
+            maximum_chunk_limit: 最大分片大小 默认10MB
+
+        Returns:
+            str: 文件的哈希值
+        """
+        hasher = hashlib.md5()
+        file_size = os.path.getsize(source_file_path)
+
+        async with aiofiles.open(source_file_path, mode='rb') as file_object:  # 打开文件
+            if file_size > maximum_chunk_limit:  # 如果文件大于10MB，则采用分片读取，懒得一次加载全部
+                while True:
+                    buffer_slice = await file_object.read(buffer_size)
+                    if not buffer_slice:
+                        break
+                    hasher.update(buffer_slice)
+            else:
+                file_content = await file_object.read()  # 小文件就直接读取吧
+                hasher.update(file_content)
+
+        return hasher.hexdigest()
+
     async def wait_for_file_to_stabilize(self, source_file_path: str) -> bool:
         """
-        等待文件大小稳定，用于确保文件写入完成。
+        等待文件哈希值稳定，用于确保文件写入完成。
 
         Args:
             source_file_path: 要监控的文件路径
@@ -168,24 +199,25 @@ class FileProcessor:
             bool: 如果文件在超时时间内稳定返回 True，否则返回 False
         """
         try:
-            previous_file_size = os.path.getsize(source_file_path)
-            end_time = time.time() + config.retry.move_timeout
+            previous_file_hash = await self.get_file_hash(source_file_path)
+            timeout_timestamp = time.time() + config.retry.move_timeout
 
-            while time.time() < end_time:
+            while time.time() < timeout_timestamp:
                 await asyncio.sleep(config.retry.wait_for_stabilize)
-                current_file_size = os.path.getsize(source_file_path)
 
-                # 如果文件大小没有变化，则认为文件稳定, 返回 True, 否则更新上次文件大小, 用于下次比较
-                if current_file_size == previous_file_size:
+                current_file_hash = await self.get_file_hash(source_file_path)
+
+                # 如果文件哈希值没有变化，则认为文件稳定, 返回 True, 否则更新上次文件哈希值, 用于下次比较
+                if current_file_hash == previous_file_hash:
                     return True
                 else:
-                    previous_file_size = current_file_size
+                    previous_file_hash = current_file_hash
 
-            # 如果文件大小一直在变化，则认为文件不稳定, 返回 False
+            # 如果文件哈希值一直在变化，则认为文件不稳定, 返回 False
             return False
 
         except OSError as exception:
-            logger.error(f"Error checking file size: {exception}")
+            logger.error(f"Error checking file hash: {exception}")
             return False
         except Exception as exception:
             logger.error(f"Unexpected error while waiting for file to stabilize: {exception}")
@@ -203,33 +235,6 @@ class FileProcessor:
         async with aiofiles.open('failed_files.txt', 'a') as f:
             await f.write(
                 f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to process {source_file_path} to {target_directory}: {error}\n")
-
-    async def get_file_hash(self, source_file_path: str) -> Optional[str]:
-        """
-        计算文件的 MD5 哈希值。
-        结果会被缓存以提高性能。
-
-        Args:
-            source_file_path: 要计算哈希的文件路径
-
-        Returns:
-            Optional[str]: 文件的 MD5 哈希值，如果计算失败则返回 None
-        """
-        status = self.obtain_file_status(source_file_path)
-        if status.hash_value:
-            return status.hash_value
-
-        try:
-            file_hash = hashlib.md5()
-            async with aiofiles.open(source_file_path, 'rb') as f:
-                while chunk := await f.read(8192):
-                    file_hash.update(chunk)
-
-            status.hash_value = file_hash.hexdigest()
-            return status.hash_value
-        except Exception as exception:
-            logger.error(f"Failed to generate hash for {source_file_path}: {exception}")
-            return None
 
 
 class DirectoryEventHandler(FileSystemEventHandler):
@@ -284,7 +289,7 @@ async def monitor_directory() -> None:
     event_loop = asyncio.get_running_loop()
     observer = Observer()
 
-    for watch_path in config.path.watch_paths:
+    for watch_path in config.path.source_directory_list:
         if not os.path.exists(watch_path):
             os.makedirs(watch_path)
 
@@ -294,8 +299,8 @@ async def monitor_directory() -> None:
     observer.start()
 
     try:
-        logger.info(f"Monitoring directories: {', '.join(config.path.watch_paths)}")
-        logger.info(f"Target directories: {', '.join(config.path.move_to)}")
+        logger.info(f"Monitoring directories: {', '.join(config.path.source_directory_list)}")
+        logger.info(f"Target directories: {', '.join(config.path.target_directory_list)}")
         while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:

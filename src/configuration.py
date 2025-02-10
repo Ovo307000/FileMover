@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Set
+from typing import List
 
 
 class ProcessMethod(str, Enum):
@@ -31,7 +31,7 @@ class SyncFolder:
     """
     source_path: List[str]  # 源目录路径
     target_path: List[str]  # 目标目录路径
-    enable_status: bool     # 是否启用该配置
+    enable_status: bool  # 是否启用该配置
 
 
 @dataclass
@@ -57,12 +57,11 @@ class PathConfig:
     定义了文件监控和处理的路径配置。
 
     Attributes:
-        move_to: 文件处理后的目标目录集合
-        watch_paths: 需要监控的源目录列表
-        sync_folders: 需要同步的目录配置列表
+        source_directory_list: 文件处理后的目标目录集合
+        target_directory_list: 需要监控的源目录列表
     """
-    watch_paths: List[str] = field(default_factory=lambda: [r'A:\ComfyUI_windows_portable\ComfyUI\output'])
-    move_to: List[str] = field(default_factory=lambda: [r'F:\Lib\Pictures\Anime - 副本'])
+    source_directory_list: List[str] = field(default_factory=lambda: [r'F:\Lib\Pictures\Anime'])
+    target_directory_list: List[str] = field(default_factory=lambda: [r'F:\Lib\Pictures\Anime - 副本', r'F:\Lib\Pictures\Anime - 副本2'])
 
 @dataclass
 class RetryConfig:
